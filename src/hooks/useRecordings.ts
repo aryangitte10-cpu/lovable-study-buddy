@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Recording } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { triggerWebhook } from '@/hooks/useWebhookTrigger';
 
 export function useRecordings(chapterId?: string) {
   const { user } = useAuth();
@@ -45,6 +46,13 @@ export function useRecordings(chapterId?: string) {
       });
       
       if (error) throw error;
+      
+      // Trigger webhook
+      await triggerWebhook('recording.marked_done', user.id, {
+        chapter_id: chapterId,
+        result: data,
+      });
+      
       return data;
     },
     onSuccess: () => {

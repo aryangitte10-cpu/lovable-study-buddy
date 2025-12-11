@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useChapters } from '@/hooks/useChapters';
 import { useQuestions } from '@/hooks/useQuestions';
@@ -8,9 +8,8 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   BarChart3, BookOpen, HelpCircle, CheckCircle2, 
-  TrendingUp, Star, Calendar 
+  TrendingUp, Star, Calendar, Eye
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
 
 export default function Analytics() {
   const [timeRange, setTimeRange] = useState('7');
@@ -25,7 +24,24 @@ export default function Analytics() {
   const totalLectures = chapters.reduce((acc, c) => acc + c.lectures_total, 0);
   const completedLectures = chapters.reduce((acc, c) => acc + c.lectures_done, 0);
   const totalQuestions = questions.length;
-  const reviewedQuestions = questions.filter(q => q.times_seen > 0).length;
+
+  // Time-filtered stats
+  const timeFilteredStats = useMemo(() => {
+    const now = new Date();
+    const days = parseInt(timeRange);
+    const cutoffDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    
+    const questionsSeenInRange = questions.filter(q => {
+      if (!q.last_seen_at) return false;
+      return new Date(q.last_seen_at) >= cutoffDate;
+    });
+    
+    return {
+      questionsSeen: questionsSeenInRange.length,
+      uniqueQuestionsSeen: questionsSeenInRange.length,
+      totalTimesSeen: questionsSeenInRange.reduce((acc, q) => acc + q.times_seen, 0),
+    };
+  }, [questions, timeRange]);
 
   // Subject breakdown
   const subjectStats = subjects.map(subject => {
@@ -34,11 +50,18 @@ export default function Analytics() {
     const total = subjectChapters.length;
     const progress = total > 0 ? (completed / total) * 100 : 0;
     
+    const subjectLecturesTotal = subjectChapters.reduce((acc, c) => acc + c.lectures_total, 0);
+    const subjectLecturesDone = subjectChapters.reduce((acc, c) => acc + c.lectures_done, 0);
+    const lectureProgress = subjectLecturesTotal > 0 ? (subjectLecturesDone / subjectLecturesTotal) * 100 : 0;
+    
     return {
       ...subject,
       completed,
       total,
       progress,
+      lecturesTotal: subjectLecturesTotal,
+      lecturesDone: subjectLecturesDone,
+      lectureProgress,
     };
   });
 
@@ -107,7 +130,7 @@ export default function Analytics() {
                   <p className="text-sm text-muted-foreground">Questions</p>
                   <p className="text-2xl font-bold">{totalQuestions}</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {reviewedQuestions} reviewed
+                    Total in bank
                   </p>
                 </div>
                 <HelpCircle className="h-10 w-10 text-warning/20" />
@@ -115,17 +138,17 @@ export default function Analytics() {
             </CardContent>
           </Card>
           
-          <Card>
+          <Card className="bg-primary/5 border-primary/20">
             <CardContent className="pt-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">5★ Questions</p>
-                  <p className="text-2xl font-bold">{questions.filter(q => q.stars === 5).length}</p>
+                  <p className="text-sm text-muted-foreground">Reviewed ({timeRange}d)</p>
+                  <p className="text-2xl font-bold text-primary">{timeFilteredStats.questionsSeen}</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    High priority
+                    Questions seen
                   </p>
                 </div>
-                <Star className="h-10 w-10 text-amber-400/20" />
+                <Eye className="h-10 w-10 text-primary/20" />
               </div>
             </CardContent>
           </Card>
@@ -142,7 +165,7 @@ export default function Analytics() {
           <CardContent>
             <div className="space-y-6">
               {subjectStats.map((subject) => (
-                <div key={subject.id} className="space-y-2">
+                <div key={subject.id} className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div 
@@ -155,7 +178,20 @@ export default function Analytics() {
                       {subject.completed}/{subject.total} chapters
                     </span>
                   </div>
-                  <Progress value={subject.progress} className="h-2" />
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Chapters</span>
+                      <span>{subject.progress.toFixed(0)}%</span>
+                    </div>
+                    <Progress value={subject.progress} className="h-2" />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Lectures ({subject.lecturesDone}/{subject.lecturesTotal})</span>
+                      <span>{subject.lectureProgress.toFixed(0)}%</span>
+                    </div>
+                    <Progress value={subject.lectureProgress} className="h-1.5" />
+                  </div>
                 </div>
               ))}
               
@@ -201,19 +237,32 @@ export default function Analytics() {
           </CardContent>
         </Card>
 
-        {/* Recent Activity placeholder */}
+        {/* Time-filtered Activity Summary */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Calendar className="h-5 w-5" />
-              Recent Activity
+              Activity Summary (Last {timeRange} Days)
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-8 text-muted-foreground">
-              <BarChart3 className="h-12 w-12 mx-auto mb-4 opacity-30" />
-              <p>Detailed activity charts coming soon</p>
-              <p className="text-sm mt-1">Track your daily progress and streaks</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="p-4 rounded-lg bg-secondary/50">
+                <p className="text-sm text-muted-foreground">Questions Reviewed</p>
+                <p className="text-3xl font-bold">{timeFilteredStats.questionsSeen}</p>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/50">
+                <p className="text-sm text-muted-foreground">5★ Questions</p>
+                <p className="text-3xl font-bold text-amber-500">
+                  {questions.filter(q => q.stars === 5).length}
+                </p>
+              </div>
+              <div className="p-4 rounded-lg bg-secondary/50">
+                <p className="text-sm text-muted-foreground">Due Today</p>
+                <p className="text-3xl font-bold text-warning">
+                  {questions.filter(q => q.next_due && new Date(q.next_due) <= new Date()).length}
+                </p>
+              </div>
             </div>
           </CardContent>
         </Card>

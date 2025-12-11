@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Question } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { triggerWebhook } from '@/hooks/useWebhookTrigger';
 
 interface MarkQuestionSeenResult {
   success?: boolean;
@@ -11,6 +12,14 @@ interface MarkQuestionSeenResult {
   next_due?: string;
   times_seen?: number;
   error?: string;
+}
+
+interface QuestionStarCounts {
+  [chapterId: string]: {
+    star3: number;
+    star4: number;
+    star5: number;
+  };
 }
 
 export function useQuestions(chapterId?: string, dueDate?: string) {
@@ -49,6 +58,35 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
     enabled: !!user,
   });
 
+  // Fetch star counts per chapter for display on chapter cards
+  const starCountsQuery = useQuery({
+    queryKey: ['question_star_counts', user?.id],
+    queryFn: async () => {
+      if (!user) return {};
+      
+      const { data, error } = await supabase
+        .from('questions')
+        .select('chapter_id, stars')
+        .eq('user_id', user.id);
+      
+      if (error) throw error;
+      
+      const counts: QuestionStarCounts = {};
+      
+      data.forEach((q) => {
+        if (!counts[q.chapter_id]) {
+          counts[q.chapter_id] = { star3: 0, star4: 0, star5: 0 };
+        }
+        if (q.stars === 3) counts[q.chapter_id].star3++;
+        else if (q.stars === 4) counts[q.chapter_id].star4++;
+        else if (q.stars === 5) counts[q.chapter_id].star5++;
+      });
+      
+      return counts;
+    },
+    enabled: !!user,
+  });
+
   const createQuestion = useMutation({
     mutationFn: async (newQuestion: {
       chapter_id: string;
@@ -78,10 +116,14 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
         new_value: data,
       });
       
+      // Trigger webhook
+      await triggerWebhook('question.created', user.id, { question: data });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_star_counts'] });
       toast({ title: 'Question added successfully' });
     },
     onError: (error) => {
@@ -95,6 +137,15 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
 
   const updateQuestion = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Question> & { id: string }) => {
+      if (!user) throw new Error('Not authenticated');
+      
+      // Get old value
+      const { data: oldData } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
       const { data, error } = await supabase
         .from('questions')
         .update(updates)
@@ -104,20 +155,23 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
       
       if (error) throw error;
       
-      if (user) {
-        await supabase.from('audit_logs').insert({
-          user_id: user.id,
-          action: 'question.updated',
-          resource_type: 'question',
-          resource_id: id,
-          new_value: data,
-        });
-      }
+      await supabase.from('audit_logs').insert({
+        user_id: user.id,
+        action: 'question.updated',
+        resource_type: 'question',
+        resource_id: id,
+        old_value: oldData,
+        new_value: data,
+      });
+      
+      // Trigger webhook
+      await triggerWebhook('question.updated', user.id, { question: data, previous: oldData });
       
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['question_star_counts'] });
     },
   });
 
@@ -131,7 +185,18 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
       });
       
       if (error) throw error;
-      return data as MarkQuestionSeenResult;
+      
+      const result = data as MarkQuestionSeenResult;
+      
+      // Trigger webhook
+      await triggerWebhook('question.seen', user.id, {
+        question_id: questionId,
+        stars: result.stars,
+        next_due: result.next_due,
+        times_seen: result.times_seen,
+      });
+      
+      return result;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
@@ -152,6 +217,7 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
 
   return {
     questions: query.data || [],
+    starCounts: starCountsQuery.data || {},
     isLoading: query.isLoading,
     error: query.error,
     createQuestion,

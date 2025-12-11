@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useChapters } from '@/hooks/useChapters';
 import { useSubjects } from '@/hooks/useSubjects';
+import { useQuestions } from '@/hooks/useQuestions';
 import { SubjectType } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,13 +21,29 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { BookOpen, Plus, Search, Mic, CheckCircle2, Loader2 } from 'lucide-react';
+import { BookOpen, Plus, Search, Mic, CheckCircle2, Loader2, MoreVertical, Pencil, Trash2, Star } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function Chapters() {
@@ -34,9 +51,13 @@ export default function Chapters() {
   const subjectFilter = searchParams.get('subject') as SubjectType | null;
   const [searchQuery, setSearchQuery] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedChapter, setSelectedChapter] = useState<{ id: string; name: string; description: string; subject_id: string } | null>(null);
   
-  const { chapters, isLoading, createChapter } = useChapters(subjectFilter);
+  const { chapters, isLoading, createChapter, updateChapter, deleteChapter } = useChapters(subjectFilter);
   const { subjects } = useSubjects();
+  const { starCounts } = useQuestions();
   
   const [newChapter, setNewChapter] = useState({
     name: '',
@@ -44,6 +65,12 @@ export default function Chapters() {
     subject_id: '',
     lectures_total: 4,
     priority: 1,
+  });
+
+  const [editChapter, setEditChapter] = useState({
+    name: '',
+    description: '',
+    subject_id: '',
   });
 
   const handleSubjectChange = (value: string) => {
@@ -68,6 +95,45 @@ export default function Chapters() {
     
     setNewChapter({ name: '', description: '', subject_id: '', lectures_total: 4, priority: 1 });
     setIsDialogOpen(false);
+  };
+
+  const handleEditChapter = async () => {
+    if (!selectedChapter || !editChapter.name || !editChapter.subject_id) return;
+    
+    await updateChapter.mutateAsync({
+      id: selectedChapter.id,
+      name: editChapter.name,
+      description: editChapter.description || null,
+      subject_id: editChapter.subject_id,
+    });
+    
+    setEditDialogOpen(false);
+    setSelectedChapter(null);
+  };
+
+  const handleDeleteChapter = async () => {
+    if (!selectedChapter) return;
+    
+    await deleteChapter.mutateAsync(selectedChapter.id);
+    
+    setDeleteDialogOpen(false);
+    setSelectedChapter(null);
+  };
+
+  const openEditDialog = (chapter: typeof selectedChapter) => {
+    if (!chapter) return;
+    setSelectedChapter(chapter);
+    setEditChapter({
+      name: chapter.name,
+      description: chapter.description || '',
+      subject_id: chapter.subject_id,
+    });
+    setEditDialogOpen(true);
+  };
+
+  const openDeleteDialog = (chapter: typeof selectedChapter) => {
+    setSelectedChapter(chapter);
+    setDeleteDialogOpen(true);
   };
 
   const filteredChapters = chapters.filter(chapter =>
@@ -232,9 +298,45 @@ export default function Chapters() {
                 ? (chapter.lectures_done / chapter.lectures_total) * 100 
                 : 0;
               
+              const chapterStars = starCounts[chapter.id] || { star3: 0, star4: 0, star5: 0 };
+              
               return (
-                <Link key={chapter.id} to={`/chapters/${chapter.id}`}>
-                  <Card className="h-full hover:shadow-lg transition-all hover:border-primary/30 cursor-pointer group">
+                <Card key={chapter.id} className="h-full hover:shadow-lg transition-all hover:border-primary/30 group relative">
+                  {/* Actions dropdown */}
+                  <div className="absolute top-3 right-3 z-10">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditDialog({
+                          id: chapter.id,
+                          name: chapter.name,
+                          description: chapter.description || '',
+                          subject_id: chapter.subject_id,
+                        })}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          Edit
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => openDeleteDialog({
+                            id: chapter.id,
+                            name: chapter.name,
+                            description: chapter.description || '',
+                            subject_id: chapter.subject_id,
+                          })}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+
+                  <Link to={`/chapters/${chapter.id}`}>
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div className={cn(
@@ -243,7 +345,7 @@ export default function Chapters() {
                         )}>
                           <BookOpen className="h-5 w-5" />
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 mr-8">
                           {chapter.is_completed && (
                             <CheckCircle2 className="h-5 w-5 text-success" />
                           )}
@@ -269,6 +371,22 @@ export default function Chapters() {
                         </div>
                         <Progress value={progress} className="h-2" />
                         
+                        {/* Star breakdown */}
+                        <div className="flex items-center gap-3 text-xs">
+                          <div className="flex items-center gap-1">
+                            <Star className="h-3 w-3 fill-amber-500 text-amber-500" />
+                            <span className="font-medium">5★:{chapterStars.star5}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                            <span className="font-medium">4★:{chapterStars.star4}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Star className="h-3 w-3 fill-slate-400 text-slate-400" />
+                            <span className="font-medium">3★:{chapterStars.star3}</span>
+                          </div>
+                        </div>
+                        
                         <div className="flex items-center justify-between pt-2">
                           <Badge variant="secondary" className="text-xs">
                             {chapter.subject?.name}
@@ -282,12 +400,96 @@ export default function Chapters() {
                         </div>
                       </div>
                     </CardContent>
-                  </Card>
-                </Link>
+                  </Link>
+                </Card>
               );
             })}
           </div>
         )}
+
+        {/* Edit Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle>Edit Chapter</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 pt-4">
+              <div className="space-y-2">
+                <Label>Subject *</Label>
+                <Select
+                  value={editChapter.subject_id}
+                  onValueChange={(value) => setEditChapter(prev => ({ ...prev, subject_id: value }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a subject" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {subjects.map((subject) => (
+                      <SelectItem key={subject.id} value={subject.id}>
+                        {subject.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Chapter Name *</Label>
+                <Input
+                  value={editChapter.name}
+                  onChange={(e) => setEditChapter(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Quadratic Equations"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea
+                  value={editChapter.description}
+                  onChange={(e) => setEditChapter(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional description..."
+                  rows={3}
+                />
+              </div>
+              
+              <Button 
+                onClick={handleEditChapter} 
+                className="w-full"
+                disabled={!editChapter.name || !editChapter.subject_id || updateChapter.isPending}
+              >
+                {updateChapter.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Chapter?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete "{selectedChapter?.name}" and all its lectures, questions, and recordings. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction 
+                onClick={handleDeleteChapter}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {deleteChapter.isPending ? 'Deleting...' : 'Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppLayout>
   );

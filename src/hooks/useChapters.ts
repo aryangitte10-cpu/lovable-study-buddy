@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Chapter, SubjectType } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { triggerWebhook } from '@/hooks/useWebhookTrigger';
 
 export function useChapters(subjectFilter?: SubjectType | null) {
   const { user } = useAuth();
@@ -84,10 +85,19 @@ export function useChapters(subjectFilter?: SubjectType | null) {
         new_value: data,
       });
       
+      // Trigger webhook
+      await triggerWebhook('chapter.created', user.id, { chapter: data });
+      
+      // Trigger lecture.created webhooks
+      for (let i = 0; i < lectures.length; i++) {
+        await triggerWebhook('lecture.created', user.id, { lecture: lectures[i] });
+      }
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chapters'] });
+      queryClient.invalidateQueries({ queryKey: ['lectures'] });
       toast({ title: 'Chapter created successfully' });
     },
     onError: (error) => {
@@ -101,6 +111,15 @@ export function useChapters(subjectFilter?: SubjectType | null) {
 
   const updateChapter = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Chapter> & { id: string }) => {
+      if (!user) throw new Error('Not authenticated');
+      
+      // Get old value for audit
+      const { data: oldData } = await supabase
+        .from('chapters')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
       const { data, error } = await supabase
         .from('chapters')
         .update(updates)
@@ -111,20 +130,81 @@ export function useChapters(subjectFilter?: SubjectType | null) {
       if (error) throw error;
       
       // Log audit
-      if (user) {
-        await supabase.from('audit_logs').insert({
-          user_id: user.id,
-          action: 'chapter.updated',
-          resource_type: 'chapter',
-          resource_id: id,
-          new_value: data,
-        });
-      }
+      await supabase.from('audit_logs').insert({
+        user_id: user.id,
+        action: 'chapter.updated',
+        resource_type: 'chapter',
+        resource_id: id,
+        old_value: oldData,
+        new_value: data,
+      });
+      
+      // Trigger webhook
+      await triggerWebhook('chapter.updated', user.id, { chapter: data, previous: oldData });
       
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['chapters'] });
+      toast({ title: 'Chapter updated successfully' });
+    },
+    onError: (error) => {
+      toast({ 
+        title: 'Failed to update chapter', 
+        description: error.message,
+        variant: 'destructive' 
+      });
+    },
+  });
+
+  const deleteChapter = useMutation({
+    mutationFn: async (id: string) => {
+      if (!user) throw new Error('Not authenticated');
+      
+      // Get chapter data for audit/webhook
+      const { data: chapterData } = await supabase
+        .from('chapters')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      // Delete related data first (cascade)
+      await supabase.from('questions').delete().eq('chapter_id', id);
+      await supabase.from('recordings').delete().eq('chapter_id', id);
+      await supabase.from('lectures').delete().eq('chapter_id', id);
+      
+      // Delete chapter
+      const { error } = await supabase
+        .from('chapters')
+        .delete()
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      // Log audit
+      await supabase.from('audit_logs').insert({
+        user_id: user.id,
+        action: 'chapter.deleted',
+        resource_type: 'chapter',
+        resource_id: id,
+        old_value: chapterData,
+      });
+      
+      return chapterData;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chapters'] });
+      queryClient.invalidateQueries({ queryKey: ['lectures'] });
+      queryClient.invalidateQueries({ queryKey: ['questions'] });
+      queryClient.invalidateQueries({ queryKey: ['recordings'] });
+      toast({ title: 'Chapter deleted successfully' });
+    },
+    onError: (error) => {
+      toast({ 
+        title: 'Failed to delete chapter', 
+        description: error.message,
+        variant: 'destructive' 
+      });
     },
   });
 
@@ -134,5 +214,6 @@ export function useChapters(subjectFilter?: SubjectType | null) {
     error: query.error,
     createChapter,
     updateChapter,
+    deleteChapter,
   };
 }
