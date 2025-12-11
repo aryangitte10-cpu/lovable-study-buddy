@@ -2,3 +2,9 @@ project_id = "swvwgdubuembvfvguojg"
 
 [functions.send-webhook]
 verify_jwt = false
+
+[functions.daily-scheduler]
+verify_jwt = false
+
+[functions.validate-readonly-key]
+verify_jwt = false

@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Lecture } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { triggerWebhook } from '@/hooks/useWebhookTrigger';
 
 interface MarkLectureDoneResult {
   success?: boolean;
@@ -44,12 +45,35 @@ export function useLectures(chapterId?: string) {
       });
       
       if (error) throw error;
-      return data as MarkLectureDoneResult;
+      
+      const result = data as MarkLectureDoneResult;
+      
+      // Trigger webhook for lecture.completed
+      await triggerWebhook('lecture.completed', user.id, {
+        lecture_id: lectureId,
+        chapter_id: result.chapter_id,
+        all_lectures_done: result.all_lectures_done,
+      });
+      
+      // If recording was created, trigger that webhook too
+      if (result.all_lectures_done) {
+        await triggerWebhook('recording.created', user.id, {
+          chapter_id: result.chapter_id,
+        });
+        
+        await triggerWebhook('schedule_task.created', user.id, {
+          task_type: 'revision_recording',
+          chapter_id: result.chapter_id,
+        });
+      }
+      
+      return result;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['lectures'] });
       queryClient.invalidateQueries({ queryKey: ['chapters'] });
       queryClient.invalidateQueries({ queryKey: ['recordings'] });
+      queryClient.invalidateQueries({ queryKey: ['schedule_tasks'] });
       
       if (data?.all_lectures_done) {
         toast({ 
@@ -94,11 +118,37 @@ export function useLectures(chapterId?: string) {
         .update({ lectures_total: newLecture.lecture_number })
         .eq('id', newLecture.chapter_id);
       
+      // Trigger webhook
+      await triggerWebhook('lecture.created', user.id, { lecture: data });
+      
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['lectures'] });
       queryClient.invalidateQueries({ queryKey: ['chapters'] });
+    },
+  });
+
+  const updateLecture = useMutation({
+    mutationFn: async ({ id, ...updates }: Partial<Lecture> & { id: string }) => {
+      if (!user) throw new Error('Not authenticated');
+      
+      const { data, error } = await supabase
+        .from('lectures')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      // Trigger webhook
+      await triggerWebhook('lecture.updated', user.id, { lecture: data });
+      
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lectures'] });
     },
   });
 
@@ -108,5 +158,6 @@ export function useLectures(chapterId?: string) {
     error: query.error,
     markLectureDone,
     createLecture,
+    updateLecture,
   };
 }
