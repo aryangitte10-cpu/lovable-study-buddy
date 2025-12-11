@@ -30,14 +30,16 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
-const EVENT_TYPES = [
+import { WebhookEventType } from '@/lib/types';
+
+const EVENT_TYPES: WebhookEventType[] = [
   'chapter.created', 'chapter.updated',
   'lecture.created', 'lecture.updated', 'lecture.completed',
   'question.created', 'question.updated', 'question.seen',
   'recording.created', 'recording.marked_done',
   'schedule_task.created', 'schedule_task.updated',
   'daily.audit_summary',
-] as const;
+];
 
 export default function Webhooks() {
   const { user } = useAuth();
@@ -49,7 +51,7 @@ export default function Webhooks() {
   const [newWebhook, setNewWebhook] = useState({
     name: '',
     url: '',
-    event_types: [] as string[],
+    event_types: [] as WebhookEventType[],
   });
 
   // Fetch webhooks
@@ -161,7 +163,7 @@ export default function Webhooks() {
     toast({ title: 'Copied to clipboard' });
   };
 
-  const toggleEventType = (eventType: string) => {
+  const toggleEventType = (eventType: WebhookEventType) => {
     setNewWebhook(prev => ({
       ...prev,
       event_types: prev.event_types.includes(eventType)
