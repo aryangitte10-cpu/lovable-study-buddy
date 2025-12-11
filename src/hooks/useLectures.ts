@@ -4,6 +4,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Lecture } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
+interface MarkLectureDoneResult {
+  success?: boolean;
+  lecture_id?: string;
+  chapter_id?: string;
+  all_lectures_done?: boolean;
+  error?: string;
+}
+
 export function useLectures(chapterId?: string) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -27,7 +35,7 @@ export function useLectures(chapterId?: string) {
   });
 
   const markLectureDone = useMutation({
-    mutationFn: async (lectureId: string) => {
+    mutationFn: async (lectureId: string): Promise<MarkLectureDoneResult> => {
       if (!user) throw new Error('Not authenticated');
       
       const { data, error } = await supabase.rpc('mark_lecture_done', {
@@ -36,9 +44,9 @@ export function useLectures(chapterId?: string) {
       });
       
       if (error) throw error;
-      return data;
+      return data as MarkLectureDoneResult;
     },
-    onSuccess: (data: Record<string, unknown> | null) => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['lectures'] });
       queryClient.invalidateQueries({ queryKey: ['chapters'] });
       queryClient.invalidateQueries({ queryKey: ['recordings'] });
