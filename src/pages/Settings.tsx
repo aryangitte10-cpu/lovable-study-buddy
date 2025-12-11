@@ -11,6 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -32,9 +33,10 @@ import {
 import { 
   Settings as SettingsIcon, Key, MessageSquare, Bell, 
   Shield, Copy, Plus, Trash2, Loader2, Eye, EyeOff,
-  AlertTriangle
+  AlertTriangle, FileText, Save
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useMessageTemplates } from '@/hooks/useMessageTemplates';
 import { ToneType } from '@/lib/types';
 
 export default function Settings() {
@@ -163,7 +165,7 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="general" className="space-y-6">
-          <TabsList>
+          <TabsList className="flex-wrap h-auto gap-1">
             <TabsTrigger value="general" className="gap-2">
               <SettingsIcon className="h-4 w-4" />
               General
@@ -175,6 +177,10 @@ export default function Settings() {
             <TabsTrigger value="tone" className="gap-2">
               <MessageSquare className="h-4 w-4" />
               Tone Control
+            </TabsTrigger>
+            <TabsTrigger value="templates" className="gap-2">
+              <FileText className="h-4 w-4" />
+              Templates
             </TabsTrigger>
           </TabsList>
 
@@ -496,8 +502,116 @@ export default function Settings() {
               </Card>
             </div>
           </TabsContent>
+
+          {/* Message Templates */}
+          <TabsContent value="templates">
+            <MessageTemplatesTab />
+          </TabsContent>
         </Tabs>
       </div>
     </AppLayout>
+  );
+}
+
+function MessageTemplatesTab() {
+  const { templates, isLoading, updateTemplate } = useMessageTemplates();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const { toast } = useToast();
+
+  const handleEdit = (id: string, content: string) => {
+    setEditingId(id);
+    setEditContent(content);
+  };
+
+  const handleSave = async () => {
+    if (!editingId) return;
+    try {
+      await updateTemplate.mutateAsync({ id: editingId, content: editContent });
+      setEditingId(null);
+      toast({ title: 'Template saved' });
+    } catch {
+      toast({ title: 'Failed to save', variant: 'destructive' });
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
+  }
+
+  const groupedTemplates = templates.reduce((acc, t) => {
+    if (!acc[t.tone]) acc[t.tone] = [];
+    acc[t.tone].push(t);
+    return acc;
+  }, {} as Record<string, typeof templates>);
+
+  return (
+    <div className="space-y-6">
+      {Object.entries(groupedTemplates).map(([tone, toneTemplates]) => (
+        <Card key={tone}>
+          <CardHeader>
+            <CardTitle className="capitalize flex items-center gap-2">
+              {tone === 'friendly' && '😊'}
+              {tone === 'encouraging' && '💪'}
+              {tone === 'stern' && '📢'}
+              {tone === 'tough_love' && '🔥'}
+              {tone.replace('_', ' ')} Templates
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {toneTemplates.map((template) => (
+              <div key={template.id} className="border rounded-lg p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{template.name}</p>
+                    <Badge variant="outline">{template.reminder_time}</Badge>
+                    <Badge variant="secondary">{template.template_type}</Badge>
+                  </div>
+                  {editingId === template.id ? (
+                    <Button 
+                      size="sm" 
+                      onClick={handleSave}
+                      disabled={updateTemplate.isPending}
+                    >
+                      {updateTemplate.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4" />
+                      )}
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => handleEdit(template.id, template.content)}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </div>
+                {editingId === template.id ? (
+                  <Textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={3}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground italic">
+                    "{template.content}"
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Last updated: {new Date(template.created_at || '').toLocaleDateString()}
+                </p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 }
