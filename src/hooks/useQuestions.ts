@@ -4,6 +4,15 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Question } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
+interface MarkQuestionSeenResult {
+  success?: boolean;
+  question_id?: string;
+  stars?: number;
+  next_due?: string;
+  times_seen?: number;
+  error?: string;
+}
+
 export function useQuestions(chapterId?: string, dueDate?: string) {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -14,7 +23,7 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
     queryFn: async () => {
       if (!user) return [];
       
-      let query = supabase
+      let q = supabase
         .from('questions')
         .select(`
           *,
@@ -25,14 +34,14 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
         .order('created_at', { ascending: false });
       
       if (chapterId) {
-        query = query.eq('chapter_id', chapterId);
+        q = q.eq('chapter_id', chapterId);
       }
       
       if (dueDate) {
-        query = query.lte('next_due', dueDate);
+        q = q.lte('next_due', dueDate);
       }
       
-      const { data, error } = await query;
+      const { data, error } = await q;
       
       if (error) throw error;
       return data as (Question & { chapter: { id: string; name: string; subject_id: string } })[];
@@ -54,14 +63,13 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
         .insert({
           ...newQuestion,
           user_id: user.id,
-          next_due: new Date().toISOString().split('T')[0], // Due today
+          next_due: new Date().toISOString().split('T')[0],
         })
         .select()
         .single();
       
       if (error) throw error;
       
-      // Log audit
       await supabase.from('audit_logs').insert({
         user_id: user.id,
         action: 'question.created',
@@ -96,7 +104,6 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
       
       if (error) throw error;
       
-      // Log audit
       if (user) {
         await supabase.from('audit_logs').insert({
           user_id: user.id,
@@ -115,7 +122,7 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
   });
 
   const markQuestionSeen = useMutation({
-    mutationFn: async (questionId: string) => {
+    mutationFn: async (questionId: string): Promise<MarkQuestionSeenResult> => {
       if (!user) throw new Error('Not authenticated');
       
       const { data, error } = await supabase.rpc('mark_question_seen', {
@@ -124,11 +131,11 @@ export function useQuestions(chapterId?: string, dueDate?: string) {
       });
       
       if (error) throw error;
-      return data as Record<string, unknown>;
+      return data as MarkQuestionSeenResult;
     },
-    onSuccess: (data: Record<string, unknown> | null) => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['questions'] });
-      const nextDue = data?.next_due ? new Date(data.next_due as string).toLocaleDateString() : 'soon';
+      const nextDue = data?.next_due ? new Date(data.next_due).toLocaleDateString() : 'soon';
       toast({ 
         title: 'Question reviewed', 
         description: `Next review: ${nextDue}` 
